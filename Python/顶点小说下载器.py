@@ -59,23 +59,14 @@ def get_chapter(url: str):
         "main_content": main_content
     }
 
-def write_to_text(book_name: str, content_dict: dict):
+def write_to_text(book_name: str, content_list: list):
     with open(get_date() + " " + book_name + ".txt", "w+", encoding = "utf-8") as txt:
-        for _key in sorted(content_dict.keys()):
-            _chapter = content_dict[_key]
+        for _chapter in content_list:
             txt.write(_chapter["chapter_name"])
             txt.write("\n")
             txt.write(_chapter["main_content"])
             txt.write("\n")
 
-
-content_dict = {}
-
-#THREAD
-def write_content(key: int, url: str):
-    _d = get_chapter(url)
-    content_dict[key] = _d
-    #print("获取到章节内容. 章节名: " + _d["chapter_name"])
 
 book = get_book(menu_page)
 chapter_count = len(book["chapter_urls"])
@@ -85,14 +76,23 @@ print(f"书名: {book['book_name']}")
 print(f"章节数: {chapter_count}")
 print(f"下载线程数: {thread_count}")
 
+content_list = [None] * chapter_count
+
+#THREAD
+def write_content(index: int, url: str):
+    global content_list
+    _d = get_chapter(url)
+    content_list[index] = _d
+    #print("获取到章节内容. 章节名: " + _d["chapter_name"])
+
 print("开始下载...")
 time1 = time.time()
 with ThreadPoolExecutor(max_workers = thread_count) as executor:
-    for suffix in book["chapter_urls"]:
-        executor.submit(write_content, int(suffix), menu_page + suffix + ".html")
+    for i, suffix in enumerate(book["chapter_urls"]):
+        executor.submit(write_content, i, menu_page + suffix + ".html")
 print("下载完成. 下载章节数: %d, 用时%.1f秒" % (chapter_count, time.time() - time1))
 
 print("开始写入文件...")
 time1 = time.time()
-write_to_text(book["book_name"], content_dict)
+write_to_text(book["book_name"], content_list)
 print("写入完成. 用时: %.1f秒" % (time.time() - time1))
