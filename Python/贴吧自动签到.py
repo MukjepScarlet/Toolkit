@@ -136,7 +136,7 @@ for cookies_text in cookies_texts:
             raise Exception("ERROR: %s" % result['error'])
         return [{'kw': b['forum_name'], 'fid': b['forum_id']} for b in result['data']['like_forum'] if b['is_sign'] == is_sign and b['forum_id']]
 
-    def do_sign(params: dict) -> 'dict | None': #fid: str, kw: str
+    def do_sign(params: dict) -> bool: #fid: str, kw: str
         time.sleep(random.random() * 1.2 + 0.8)
         params.update({
             'BDUSS': BDUSS,
@@ -147,15 +147,12 @@ for cookies_text in cookies_texts:
 
         if result['error_code'] == '340006':
             LOGGER.warn('%s吧签到失败, 可能是这个吧出问题了' % (params['kw']))
-            
-            return None
+            return False
+        else:
+            LOGGER.info("%s吧: 连续签到%s天, +%s" % (params['kw'], result['user_info']['cont_sign_num'], result['user_info']['sign_bonus_point']))
+            return True
 
-        return {
-            'name': params['kw'],
-            'bonus': result['user_info']['sign_bonus_point']
-        }
-
-    def do_sign_multiple(params: dict) -> 'dict | list[dict]': #forum_ids: list[str]
+    def do_sign_multiple(params: dict) -> bool: #forum_ids: list[str]
         time.sleep(random.random() * 0.5 + 1)
         params.update({
             'BDUSS': BDUSS,
@@ -164,9 +161,13 @@ for cookies_text in cookies_texts:
         session.headers = APP_HEADERS
         result = session.post('http://c.tieba.baidu.com/c/c/forum/msign', data = to_url_params_string(sign_request_params(params))).json()
         if result['error']['errno'] != '0':
-            return result['error']
+            LOGGER.error("批量签到失败, 错误信息: \n    " + ';\n    '.join([f'{k}={v}' for k, v in result['error'].items()]))
+            return False
         else:
-            return result['info']
+            for r in result['info']:
+                LOGGER.info("%s吧: 连续签到%s天, +%s" % (r['forum_name'], r['sign_day_count'], r['cur_score']))
+            LOGGER.info("批量接口调用成功, 共签到成功%d个吧" % len(result['info']))
+            return True
 
     tieba_list = get_tieba_list()
 
@@ -177,16 +178,9 @@ for cookies_text in cookies_texts:
     LOGGER.info("贴吧列表获取完成, 共有%d个贴吧待签到, 列表:" % len(tieba_list))
     LOGGER.info(", ".join(it['kw'] for it in tieba_list))
 
-    sign_multiple_result = do_sign_multiple({
+    do_sign_multiple({
         'forum_ids': [it['fid'] for it in tieba_list][:199]
     })
-
-    if type(sign_multiple_result) == type({}):
-        LOGGER.error("批量签到失败, 错误信息: \n" + ';\n    '.join([f'{k}={v}' for k, v in sign_multiple_result.items()]))
-    else:
-        LOGGER.info("批量接口调用成功, 共签到成功%d个吧\n" % len(sign_multiple_result))
-        for result in sign_multiple_result:
-            LOGGER.info("%s吧: 连续签到%d天, +%d" % (result['forum_name'], result['sign_day_count'], result['cur_score']))
     
     tieba_list = get_tieba_list()
 
@@ -199,8 +193,6 @@ for cookies_text in cookies_texts:
 
     results = [t.result() for t in tasks]
 
-    LOGGER.info('签到结束, 单个签到共有%d个贴吧成功' % len([r for r in results if r != None]))
-    for result in results:
-        LOGGER.info("%s吧: +%d" % (result['name'], result['bonus']))
+    LOGGER.info('签到结束, 单个签到共有%d个贴吧成功' % sum(results))
 
     i += 1
