@@ -135,6 +135,9 @@ def do_sign(params: dict) -> bool: #fid: str, kw: str
             'kw': params['kw'],
             'fid': params['fid']
         })
+    elif result['error_code'] == '110001':
+        LOGGER.warn('%s吧签到失败, 未知错误' % (params['kw']))
+        return False
     else:
         LOGGER.info("%s吧: 连续签到%s天, +%s" % (params['kw'], result['user_info']['cont_sign_num'], result['user_info']['sign_bonus_point']))
         return True
@@ -210,7 +213,7 @@ for cookies_text in cookies_texts:
     with ThreadPoolExecutor(max_workers = min(3, len(tieba_list))) as executor:
         random.shuffle(tieba_list)
         tasks = [executor.submit(do_sign, it) for it in tieba_list]
-    wait(tasks, return_when = ALL_COMPLETED)
+    wait(tasks, timeout = 5.0 * len(tieba_list), return_when = ALL_COMPLETED)
 
     results = [t.result() for t in tasks]
 
