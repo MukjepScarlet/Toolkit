@@ -8,6 +8,7 @@
 
 import requests, time, re, os, shutil, json
 import hashlib, random
+from urllib.parse import urlencode, quote_plus
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 
 FAKE_VERSION = '11.8.8.0'
@@ -117,30 +118,50 @@ def get_tieba_list(is_sign: bool = False) -> list[dict]:
         return []
     return [{'kw': b['forum_name'], 'fid': b['forum_id']} for b in result['data']['like_forum'] if b['is_sign'] == is_sign and b['forum_id']]
 
-def do_sign(params: dict) -> bool: #fid: str, kw: str
+def do_sign(params: dict, use_app: bool = True) -> bool: #fid: str, kw: str
     time.sleep(random.random() * 1.2 + 0.8)
-    params.update({
-        'BDUSS': BDUSS,
-        'tbs': tbs
-    })
-    session.headers = APP_HEADERS
-    result = session.post('http://c.tieba.baidu.com/c/c/forum/sign', data = to_url_params_string(sign_request_params(params)).encode('utf-8')).json()
-
-    if result['error_code'] == '340006':
-        LOGGER.warn('%s吧签到失败, 可能是这个吧出问题了' % (params['kw']))
-        return False
-    elif result['error_code'] == '340011':
-        time.sleep(random.random() * 0.5 + 1)
-        return do_sign({
-            'kw': params['kw'],
-            'fid': params['fid']
+    if use_app:
+        params.update({
+            'BDUSS': BDUSS,
+            'tbs': tbs
         })
-    elif result['error_code'] == '110001':
-        LOGGER.warn('%s吧签到失败, 未知错误' % (params['kw']))
-        return False
+        session.headers = APP_HEADERS
+        result = session.post('http://c.tieba.baidu.com/c/c/forum/sign', data = urlencode(sign_request_params(params))).json()
+
+        if result['error_code'] == '340006':
+            LOGGER.warn('%s吧签到失败, 可能是这个吧出问题了' % (params['kw']))
+            return False
+        elif result['error_code'] == '340011':
+            time.sleep(random.random() * 0.5 + 1)
+            return do_sign({
+                'kw': params['kw'],
+                'fid': params['fid']
+            })
+        elif result['error_code'] == '110001':
+            LOGGER.warn('%s吧签到失败, 未知错误' % (params['kw']))
+            return False
+        else:
+            LOGGER.info("%s吧: 连续签到%s天, +%s" % (params['kw'], result['user_info']['cont_sign_num'], result['user_info']['sign_bonus_point']))
+            return True
     else:
-        LOGGER.info("%s吧: 连续签到%s天, +%s" % (params['kw'], result['user_info']['cont_sign_num'], result['user_info']['sign_bonus_point']))
-        return True
+        params = {
+            'ie': 'utf-8',
+            'tbs': tbs,
+            'kw': params['kw'],
+        }
+        session.headers = HEADERS
+        result = session.post('https://tieba.baidu.com/sign/add', data = urlencode(params)).json()
+        if result['no'] == 1010:
+            LOGGER.warn('%s吧签到失败, 可能是这个吧出问题了' % (params['kw']))
+            return False
+        if result['no'] == 1101:
+            LOGGER.warn('%s吧今天已经签到过' % (params['kw']))
+            return False
+        else:
+            LOGGER.info("%s吧: 连续签到%s天, +%s" % (params['kw'], r['sign_day_count'], r['cur_score']))
+            return True
+        #TODO: 处理Web端签到成功的情况
+        pass
 
 def do_sign_multiple(params: dict) -> bool: #forum_ids: list[str]
     params.update({
@@ -148,8 +169,11 @@ def do_sign_multiple(params: dict) -> bool: #forum_ids: list[str]
         'tbs': tbs
     })
     session.headers = APP_HEADERS
-    result = session.post('http://c.tieba.baidu.com/c/c/forum/msign', data = to_url_params_string(sign_request_params(params))).json()
-    if result['error']['errno'] != '0':
+    result = session.post('http://c.tieba.baidu.com/c/c/forum/msign', data = urlencode(sign_request_params(params))).json()
+    if result['error']['errno'] == '340011':
+        LOGGER.warn("该账号今天已经调用过批量签到接口了")
+        return False
+    elif result['error']['errno'] != '0':
         LOGGER.error("批量签到失败, 错误信息: \n    " + ';\n    '.join([f'{k}={v}' for k, v in result['error'].items()]))
         return False
     else:
@@ -206,6 +230,11 @@ for cookies_text in cookies_texts:
         })
         
         tieba_list = get_tieba_list()
+
+        if len(tieba_list) == 0:
+            LOGGER.info('签到结束')
+            i += 1
+            continue
 
         LOGGER.info("贴吧列表获取完成, 共有%d个贴吧待签到, 列表:" % len(tieba_list))
         LOGGER.info(", ".join(it['kw'] for it in tieba_list))
